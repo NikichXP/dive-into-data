@@ -1,10 +1,13 @@
 package com.nikichxp.util;
 
+import java.util.LinkedList;
+import java.util.List;
+import java.util.stream.Collectors;
+
 public class AnotherMap {
 
 	public int size = 0;
 
-	public int minSegmentSize = 10;
 	public double splitRatio = 2.0;
 
 	private Segment first = new Segment();
@@ -17,7 +20,19 @@ public class AnotherMap {
 			segment = segment.next;
 		}
 
-		segment.put(key, value);
+		boolean put = false;
+		int probe = 0;
+
+		do {
+			try {
+				segment.put(key, value, probe);
+				put = true;
+			} catch (HashCollisionException ignored) {
+				key = Integer.toString(key).hashCode();
+				probe++;
+			}
+		} while (!put);
+
 		size++;
 
 		if (segment.size > Math.sqrt(size) * splitRatio) {
@@ -25,18 +40,42 @@ public class AnotherMap {
 		}
 	}
 
-	public Long get(int key) {
-		Segment ptr = first;
+	/**
+	 * In fact, we do have multiple possible variants in a single possible key
+	 *
+	 * @param key key for this map
+	 * @return list of possible values been put by this key
+	 */
+	public List<Long> get(int key) {
 
-		while (ptr.startKey < key) {
-			ptr = ptr.next;
-		}
+		List<Node> nodes = new LinkedList<>();
 
-		if (ptr.endKey < key) {
-			return null;
-		}
+		Node node = null;
+		int probe = 0;
+		do {
+			Segment ptr = first;
 
-		return ptr.getByKey(key);
+			System.out.println(ptr);
+			while (ptr.startKey < key) {
+				ptr = ptr.next;
+			}
+
+			if (ptr.endKey < key) {
+				return null;
+			}
+
+			node = ptr.getByKey(key);
+
+			if (node != null && node.probe == probe) {
+				nodes.add(node);
+			}
+
+			key = Integer.toString(key).hashCode();
+			probe++;
+
+		} while (node != null);
+
+		return nodes.stream().map(n -> n.value).collect(Collectors.toList());
 	}
 
 	private class Segment {
@@ -48,7 +87,7 @@ public class AnotherMap {
 
 		Node first;
 
-		private Long getByKey(int key) {
+		private Node getByKey(int key) {
 			Node ptr = first;
 			if (ptr == null || ptr.key > key) {
 				return null;
@@ -56,10 +95,10 @@ public class AnotherMap {
 			while (ptr.key < key) {
 				ptr = ptr.next;
 			}
-			return (ptr.key == key) ? ptr.value : null;
+			return (ptr.key == key) ? ptr : null;
 		}
 
-		private void put(int key, long value) {
+		private void put(int key, long value, int probe) throws HashCollisionException {
 			if (startKey > key || key > endKey) {
 				throw new IllegalArgumentException("This value cannot be here");
 			}
@@ -67,13 +106,13 @@ public class AnotherMap {
 			Node ptr = first;
 
 			if (ptr == null) {
-				first = new Node(key, value);
+				first = new Node(key, value, probe);
 				size++;
 				return;
 			}
 
 			if (key < first.key) {
-				Node node = new Node(key, value);
+				Node node = new Node(key, value, probe);
 				node.next = first;
 				node.prev = first.prev;
 				first = node;
@@ -85,45 +124,22 @@ public class AnotherMap {
 
 			do {
 
+				if (ptr.key == key) {
+					throw new HashCollisionException();
+				}
+
 				if (ptr.next == null || ptr.next.key > key) {
-					addNodeAfter(ptr, key, value);
+					addNodeAfter(ptr, key, value, probe);
 					return;
 				}
 
 				ptr = ptr.next;
 
 			} while (key < ptr.value);
-
-			if (ptr.key == key) {
-				ptr = first;
-
-				while (ptr.key == ptr.key + 1) {
-					ptr = ptr.next;
-				}
-
-				Node node = addNodeAfter(ptr, ptr.key + 1, value);
-
-				if (node.key <= this.endKey) {
-					return; // this is okay
-				}
-
-				this.size--;
-
-				// this means we have a serious trouble. value is in another segment. let's find the segment which have
-				//  that node!
-
-				Segment segment = this;
-
-				while (node.key < segment.startKey) {
-					segment = segment.next;
-				}
-
-				segment.size++;
-			}
 		}
 
-		private Node addNodeAfter(Node ptr, int key, long value) {
-			Node node = new Node(key, value);
+		private Node addNodeAfter(Node ptr, int key, long value, int probe) {
+			Node node = new Node(key, value, probe);
 			node.next = ptr.next;
 			ptr.next = node;
 			node.prev = ptr;
@@ -172,11 +188,17 @@ public class AnotherMap {
 		Node next = null;
 		Node prev = null;
 
-		Node(int key, long value) {
+		int probe = 0;
+
+		Node(int key, long value, int probe) {
 			this.key = key;
 			this.value = value;
+			this.probe = probe;
 		}
 
+	}
+
+	private class HashCollisionException extends Exception {
 	}
 
 }
